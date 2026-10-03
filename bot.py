@@ -8,51 +8,51 @@ app = Flask(__name__)
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+telegram_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-ai = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def generate_ai_reply(user_message):
+def get_ai_reply(message):
     prompt = f"""
-You are an AI assistant replying on behalf of a woman on her personal Telegram account.
+You are an assistant replying on behalf of the Telegram account owner.
 
-Reply naturally and warmly, like a real person.
-Do not say that you are an AI unless directly asked.
-Keep replies concise and conversational.
-Do not invent personal information about the account owner.
+Reply naturally, warmly, and briefly.
+Sound like a real person.
+Do not claim to be the account owner.
+Do not invent personal information.
 
-Message received:
-{user_message}
+Incoming message:
+{message}
 """
 
-    response = ai.models.generate_content(
+    response = client.interactions.create(
         model="gemini-3.8-flash",
-        contents=prompt
+        input=prompt
     )
 
-    return response.text.strip()
+    return response.output_text.strip()
 
 
-def send_message(chat_id, text, business_connection_id):
-    url = f"{TELEGRAM_API}/sendMessage"
+def send_reply(chat_id, text, business_connection_id):
+    requests.post(
+        f"{telegram_url}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "business_connection_id": business_connection_id
+        },
+        timeout=30
+    )
 
-    data = {
-        "chat_id": chat_id,
-        "text": text,
-        "business_connection_id": business_connection_id
-    }
 
-    requests.post(url, json=data, timeout=30)
-
-
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
     return "Telegram AI bot is running!"
 
 
 @app.route("/telegram-webhook", methods=["POST"])
-def telegram_webhook():
+def webhook():
     update = request.get_json(silent=True) or {}
 
     message = update.get("business_message")
@@ -61,30 +61,25 @@ def telegram_webhook():
         return jsonify({"ok": True})
 
     text = message.get("text")
-
-    if not text:
-        return jsonify({"ok": True})
-
     chat = message.get("chat", {})
     chat_id = chat.get("id")
-
     business_connection_id = message.get("business_connection_id")
 
-    if not chat_id or not business_connection_id:
+    if not text or not chat_id or not business_connection_id:
         return jsonify({"ok": True})
 
     try:
-        reply = generate_ai_reply(text)
+        reply = get_ai_reply(text)
 
         if reply:
-            send_message(
+            send_reply(
                 chat_id,
                 reply,
                 business_connection_id
             )
 
-    except Exception as e:
-        print("ERROR:", e)
+    except Exception as error:
+        print("ERROR:", error)
 
     return jsonify({"ok": True})
 
