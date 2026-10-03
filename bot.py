@@ -13,25 +13,25 @@ telegram_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def get_ai_reply(message):
+def generate_reply(message):
     prompt = f"""
 You are an assistant replying on behalf of the Telegram account owner.
 
-Reply naturally, warmly, and briefly.
-Sound like a real person.
-Do not claim to be the account owner.
+Reply naturally and warmly, like a real person.
+Keep the reply concise and conversational.
 Do not invent personal information.
+Do not claim to be the account owner.
 
-Incoming message:
+Incoming Telegram message:
 {message}
 """
 
-    response = client.interactions.create(
+    response = client.models.generate_content(
         model="gemini-3.8-flash",
-        input=prompt
+        contents=prompt
     )
 
-    return response.output_text.strip()
+    return response.text.strip()
 
 
 def send_reply(chat_id, text, business_connection_id):
@@ -46,12 +46,12 @@ def send_reply(chat_id, text, business_connection_id):
     )
 
 
-@app.route("/", methods=["GET"])
+@app.get("/")
 def home():
     return "Telegram AI bot is running!"
 
 
-@app.route("/telegram-webhook", methods=["POST"])
+@app.post("/telegram-webhook")
 def webhook():
     update = request.get_json(silent=True) or {}
 
@@ -61,15 +61,14 @@ def webhook():
         return jsonify({"ok": True})
 
     text = message.get("text")
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
+    chat_id = message.get("chat", {}).get("id")
     business_connection_id = message.get("business_connection_id")
 
     if not text or not chat_id or not business_connection_id:
         return jsonify({"ok": True})
 
     try:
-        reply = get_ai_reply(text)
+        reply = generate_reply(text)
 
         if reply:
             send_reply(
