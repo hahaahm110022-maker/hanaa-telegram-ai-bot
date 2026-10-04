@@ -13,28 +13,49 @@ telegram_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
+def get_business_connection(business_connection_id):
+    response = requests.get(
+        f"{telegram_url}/getBusinessConnection",
+        params={
+            "business_connection_id": business_connection_id
+        },
+        timeout=15
+    )
+
+    data = response.json()
+
+    if data.get("ok"):
+        return data.get("result")
+
+    print("BUSINESS CONNECTION ERROR:", data)
+    return None
+
+
 def generate_reply(message):
     prompt = f"""
-You are an AI assistant replying on behalf of the Telegram account owner.
+You are a personal AI assistant for the owner of this Telegram account.
 
-Your goal is to make every reply feel natural, warm, casual, and human.
+You are NOT the account owner.
+You must never pretend to be her or speak as if you are her.
+
+Your role is to politely handle incoming messages when she is unavailable.
 
 Rules:
-- Use Yemeni Arabic when appropriate, especially in casual conversations.
-- Keep replies short, natural, and conversational.
-- Do not use customer-service phrases such as "How can I assist you?" or "How can I help you?"
-- Do not introduce yourself as an assistant unless it is genuinely necessary.
-- Match the tone of the incoming message:
-  - Casual/friendly conversation: warm, relaxed, and natural.
-  - Formal/professional conversation: polite and respectful.
-  - Unknown or unclear person: friendly but neutral and cautious.
-- Do not assume or claim that someone is a friend, relative, or professional contact unless the conversation clearly indicates it.
-- Never invent personal information about the account owner.
-- If you do not know something about the account owner, do not guess.
-- Do not reveal private information.
-- Do not claim that the account owner personally wrote the reply.
-- Avoid robotic, repetitive, or overly formal language.
-- Use emojis naturally and sparingly.
+- Make it clear that you are her personal assistant when appropriate.
+- If someone wants to talk to her, say briefly that she is currently unavailable.
+- Invite them to leave a message for her.
+- You can tell them that you will pass their message to her.
+- Do not claim to know where she is, what she is doing, or when she will return.
+- Do not invent anything about her personal life.
+- Never pretend that you are her.
+- Never say things like "أنا موجودة" or "كنت مشغولة" as if you are the account owner.
+- If someone jokes with you, you can respond warmly and naturally, but remain the assistant.
+- Use Yemeni Arabic when appropriate.
+- Keep replies short: usually 1–2 sentences.
+- Avoid customer-service language.
+- Do not repeatedly introduce yourself as an assistant if it is already clear.
+- If someone leaves a message for her, acknowledge it briefly.
+- Never reveal private information.
 
 Incoming Telegram message:
 {message}
@@ -44,7 +65,6 @@ Incoming Telegram message:
         model="gemini-3.8-flash",
         contents=prompt
     )
-   
 
     return response.text.strip()
 
@@ -59,6 +79,24 @@ def send_reply(chat_id, text, business_connection_id):
         },
         timeout=30
     )
+
+
+def notify_owner(user_chat_id, sender_name, message_text):
+    notification = (
+        f"📩 رسالة جديدة من {sender_name}\n\n"
+        f"{message_text}"
+    )
+
+    response = requests.post(
+        f"{telegram_url}/sendMessage",
+        json={
+            "chat_id": user_chat_id,
+            "text": notification
+        },
+        timeout=15
+    )
+
+    print("OWNER NOTIFICATION:", response.text)
 
 
 @app.get("/")
@@ -83,6 +121,34 @@ def webhook():
         return jsonify({"ok": True})
 
     try:
+        business_connection = get_business_connection(
+            business_connection_id
+        )
+
+        if not business_connection:
+            return jsonify({"ok": True})
+
+        owner_user = business_connection.get("user", {})
+        owner_user_id = owner_user.get("id")
+        owner_chat_id = business_connection.get("user_chat_id")
+
+        sender = message.get("from", {})
+        sender_id = sender.get("id")
+
+        # Do not respond to messages sent by the account owner
+        if sender_id == owner_user_id:
+            return jsonify({"ok": True})
+
+        # Get sender's name
+        first_name = sender.get("first_name", "")
+        last_name = sender.get("last_name", "")
+
+        sender_name = f"{first_name} {last_name}".strip()
+
+        if not sender_name:
+            sender_name = "شخص"
+
+        # Generate AI reply
         reply = generate_reply(text)
 
         if reply:
@@ -90,6 +156,14 @@ def webhook():
                 chat_id,
                 reply,
                 business_connection_id
+            )
+
+        # Notify the account owner
+        if owner_chat_id:
+            notify_owner(
+                owner_chat_id,
+                sender_name,
+                text
             )
 
     except Exception as error:
